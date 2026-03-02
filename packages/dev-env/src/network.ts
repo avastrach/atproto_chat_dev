@@ -4,6 +4,7 @@ import * as uint8arrays from 'uint8arrays'
 import { wait } from '@atproto/common-web'
 import { createServiceJwt } from '@atproto/xrpc-server'
 import { TestBsky } from './bsky'
+import { TestChat } from './chat'
 import { EXAMPLE_LABELER } from './const'
 import { IntrospectServer } from './introspect'
 import { TestNetworkNoAppView } from './network-no-appview'
@@ -24,6 +25,7 @@ export class TestNetwork extends TestNetworkNoAppView {
     public pds: TestPds,
     public bsky: TestBsky,
     public ozone: TestOzone,
+    public chat: TestChat,
     public introspect?: IntrospectServer,
   ) {
     super(plc, pds)
@@ -113,6 +115,16 @@ export class TestNetwork extends TestNetworkNoAppView {
       ...params.ozone,
     })
 
+    const chat = await TestChat.create({
+      plcUrl: plc.url,
+      dbPostgresUrl,
+      dbPostgresSchema: `chat_${dbPostgresSchema || 'db'}`,
+      appviewUrl: bsky.url,
+      appviewDid: bsky.ctx.cfg.serverDid,
+      modServiceDid: ozoneServiceProfile.did,
+      ...params.chat,
+    })
+
     await ozoneServiceProfile.migrateTo(pds)
     await ozoneServiceProfile.createRecords()
 
@@ -146,7 +158,7 @@ export class TestNetwork extends TestNetworkNoAppView {
       )
     }
 
-    return new TestNetwork(plc, pds, bsky, ozone, introspect)
+    return new TestNetwork(plc, pds, bsky, ozone, chat, introspect)
   }
 
   async processFullSubscription(timeout = 5000) {
@@ -203,6 +215,7 @@ export class TestNetwork extends TestNetworkNoAppView {
 
   async close() {
     await Promise.all(this.feedGens.map((fg) => fg.close()))
+    await this.chat.close()
     await this.ozone.close()
     await this.bsky.close()
     await this.pds.close()
