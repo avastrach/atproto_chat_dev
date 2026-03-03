@@ -19,13 +19,13 @@ export class TestChat {
       (await Secp256k1Keypair.create({ exportable: true }))
     const signingKeyHex = ui8.toString(await serviceKeypair.export(), 'hex')
 
-    let serverDid = config.serverDid
-    if (!serverDid) {
-      serverDid = await createChatDid(config.plcUrl, serviceKeypair)
-    }
-
     const port = config.port || (await getPort())
     const url = `http://localhost:${port}`
+
+    let serverDid = config.serverDid
+    if (!serverDid) {
+      serverDid = await createChatDid(config.plcUrl, serviceKeypair, url)
+    }
 
     const cfg: ServerConfig = {
       service: {
@@ -33,6 +33,7 @@ export class TestChat {
         did: serverDid,
         version: '0.0.0-test',
         devMode: true,
+        repoProvider: config.repoProvider,
       },
       db: {
         postgresUrl: config.dbPostgresUrl,
@@ -83,6 +84,7 @@ export class TestChat {
 export const createChatDid = async (
   plcUrl: string,
   keypair: Keypair,
+  endpoint: string,
 ): Promise<string> => {
   const plcClient = new plc.Client(plcUrl)
   const plcOp = await plc.signOperation(
@@ -94,9 +96,9 @@ export const createChatDid = async (
         atproto: keypair.did(),
       },
       services: {
-        atproto_chat: {
-          type: 'AtprotoChatService',
-          endpoint: 'https://chat.public.url',
+        bsky_chat: {
+          type: 'BskyChatService',
+          endpoint,
         },
       },
       prev: null,

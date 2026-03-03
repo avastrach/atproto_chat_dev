@@ -50,6 +50,7 @@ export class ProfileSyncService {
     const now = Date.now()
     const isStale =
       !cached ||
+      !cached.handle ||
       now - new Date(cached.updatedAt).getTime() > PROFILE_STALE_MS
 
     if (!isStale && cached) {

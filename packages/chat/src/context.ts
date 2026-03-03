@@ -7,6 +7,7 @@ import { ServerConfig, ServerSecrets } from './config'
 import { Database } from './db'
 import { getRedisClient } from './redis'
 import { AccountService, ConversationService, EventLogService, MessageService, ModerationService, PrivacyService, ProfileSyncService, ReadStateService } from './services'
+import { ChatRepoSubscription } from './subscription'
 import { ViewBuilder } from './views'
 
 export interface Services {
@@ -30,6 +31,7 @@ export interface AppContextOptions {
   authVerifier: AuthVerifier
   appviewAgent: AtpAgent | undefined
   services: Services
+  subscription?: ChatRepoSubscription
 }
 
 export class AppContext {
@@ -41,6 +43,7 @@ export class AppContext {
   public authVerifier: AuthVerifier
   public appviewAgent: AtpAgent | undefined
   public services: Services
+  public subscription?: ChatRepoSubscription
 
   constructor(opts: AppContextOptions) {
     this.db = opts.db
@@ -51,6 +54,7 @@ export class AppContext {
     this.authVerifier = opts.authVerifier
     this.appviewAgent = opts.appviewAgent
     this.services = opts.services
+    this.subscription = opts.subscription
   }
 
   static async fromConfig(
@@ -124,6 +128,15 @@ export class AppContext {
       account,
     }
 
+    // Create firehose subscription if repoProvider is configured
+    const subscription = cfg.service.repoProvider
+      ? new ChatRepoSubscription({
+          service: cfg.service.repoProvider,
+          db,
+          idResolver,
+        })
+      : undefined
+
     return new AppContext({
       db,
       redis,
@@ -133,6 +146,7 @@ export class AppContext {
       authVerifier,
       appviewAgent,
       services,
+      subscription,
     })
   }
 }

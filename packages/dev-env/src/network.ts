@@ -122,6 +122,7 @@ export class TestNetwork extends TestNetworkNoAppView {
       appviewUrl: bsky.url,
       appviewDid: bsky.ctx.cfg.serverDid,
       modServiceDid: ozoneServiceProfile.did,
+      repoProvider: `ws://localhost:${pdsPort}`,
       ...params.chat,
     })
 
@@ -183,6 +184,10 @@ export class TestNetwork extends TestNetworkNoAppView {
     await this.pds.processAll()
     await this.ozone.processAll()
     await this.processFullSubscription(timeout)
+    // Process chat firehose subscription if configured
+    if (this.chat.ctx.subscription) {
+      await this.chat.ctx.subscription.processAll()
+    }
   }
 
   async serviceHeaders(did: string, lxm: string, aud?: string) {

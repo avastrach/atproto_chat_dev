@@ -19,6 +19,33 @@ export const createRouter = (ctx: AppContext): Router => {
     )
   })
 
+  router.get('/.well-known/did.json', function (_req, res) {
+    const did = ctx.cfg.service.did
+    if (!did.startsWith('did:web:')) {
+      res.status(404).send({ error: 'Not a did:web service' })
+      return
+    }
+    res.json({
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: did,
+      verificationMethod: [
+        {
+          id: `${did}#atproto`,
+          type: 'Multikey',
+          controller: did,
+          publicKeyMultibase: ctx.signingKey.did().replace('did:key:', ''),
+        },
+      ],
+      service: [
+        {
+          id: `${did}#bsky_chat`,
+          type: 'BskyChatService',
+          serviceEndpoint: `http://localhost:${ctx.cfg.service.port}`,
+        },
+      ],
+    })
+  })
+
   router.get('/xrpc/_health', async function (req, res) {
     const { version } = ctx.cfg.service
     try {

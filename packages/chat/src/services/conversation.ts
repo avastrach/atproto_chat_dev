@@ -89,13 +89,15 @@ export class ConversationService {
           .executeTakeFirst()
 
         if (callerMember?.status === 'left') {
-          // Rejoin: set status back to 'request', reset unread count
+          // Rejoin: set status back to 'request', reset unread count,
+          // and record rejoinedAt so getMessages filters out pre-leave history
           await dbTxn.db
             .updateTable('conversation_member')
             .set({
               status: 'request',
               unreadCount: 0,
               leftAt: null,
+              rejoinedAt: new Date().toISOString(),
             })
             .where('convoId', '=', convoId)
             .where('memberDid', '=', callerDid)
@@ -151,6 +153,8 @@ export class ConversationService {
         .execute()
 
       // Insert members
+      // rejoinedAt is null for initial creation -- null means "show all messages"
+      // (the member was present from the start, no history filtering needed)
       for (const memberDid of uniqueMembers) {
         const isCaller = memberDid === callerDid
         await dbTxn.db
@@ -160,6 +164,7 @@ export class ConversationService {
             memberDid,
             status: isCaller ? 'accepted' : 'request',
             acceptedAt: isCaller ? new Date().toISOString() : null,
+            rejoinedAt: null,
           })
           .execute()
       }
@@ -496,7 +501,7 @@ export class ConversationService {
         dbTxn,
         convoId,
         eventType,
-        { rev: '', convoId },
+        { convoId },
         { selfOnly: callerDid },
       )
 

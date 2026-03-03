@@ -503,12 +503,12 @@ export class MessageService {
   ): Promise<GetMessagesResult> {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100)
 
-    // Verify membership
+    // Verify membership and fetch rejoinedAt for history filtering
     const membership = await this.db.db
       .selectFrom('conversation_member')
       .where('convoId', '=', convoId)
       .where('memberDid', '=', callerDid)
-      .select('status')
+      .select(['status', 'rejoinedAt'])
       .executeTakeFirst()
 
     if (!membership) {
@@ -536,6 +536,13 @@ export class MessageService {
         'message.sentAt',
         'message.deletedAt',
       ])
+
+    // Leave-clears-history: if the caller has rejoined (rejoinedAt is not null),
+    // only show messages sent at or after the rejoin timestamp. A null rejoinedAt
+    // means the member was there from the start and should see all messages.
+    if (membership.rejoinedAt) {
+      query = query.where('message.sentAt', '>=', membership.rejoinedAt)
+    }
 
     // Cursor-based pagination using message ID
     if (opts.cursor) {

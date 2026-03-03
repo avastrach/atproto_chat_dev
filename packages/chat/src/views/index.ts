@@ -16,7 +16,7 @@ export interface ProfileRow {
 export interface ProfileViewBasic {
   $type: 'chat.bsky.actor.defs#profileViewBasic'
   did: string
-  handle?: string
+  handle: string
   displayName?: string
   avatar?: string
   chatDisabled?: boolean
@@ -111,9 +111,7 @@ export class ViewBuilder {
     const view: ProfileViewBasic = {
       $type: 'chat.bsky.actor.defs#profileViewBasic',
       did: profile.did,
-    }
-    if (profile.handle) {
-      view.handle = profile.handle
+      handle: profile.handle ?? 'handle.invalid',
     }
     if (profile.displayName) {
       view.displayName = profile.displayName
@@ -191,6 +189,7 @@ export class ViewBuilder {
       return {
         $type: 'chat.bsky.actor.defs#profileViewBasic' as const,
         did,
+        handle: 'handle.invalid',
       }
     })
 
@@ -205,7 +204,15 @@ export class ViewBuilder {
         .executeTakeFirst()
 
       if (msg) {
-        if (msg.deletedAt) {
+        // If the caller has rejoinedAt set, suppress messages sent before
+        // they rejoined to avoid leaking pre-leave content.
+        const hidePreRejoin =
+          callerMember.rejoinedAt &&
+          new Date(msg.sentAt) < new Date(callerMember.rejoinedAt)
+
+        if (hidePreRejoin) {
+          // Leave lastMessage as undefined
+        } else if (msg.deletedAt) {
           lastMessage = {
             $type: 'chat.bsky.convo.defs#deletedMessageView',
             id: msg.id,

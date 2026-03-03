@@ -23,6 +23,7 @@ export * from './config'
 export { AppContext } from './context'
 export { Database } from './db'
 export { httpLogger } from './logger'
+export { ChatRepoSubscription } from './subscription'
 
 export class ChatService {
   public ctx: AppContext
@@ -63,10 +64,14 @@ export class ChatService {
     this.server.keepAliveTimeout = 90000
     this.terminator = createHttpTerminator({ server })
     await events.once(server, 'listening')
+    // Start firehose subscription if configured
+    this.ctx.subscription?.start()
     return server
   }
 
   async destroy(): Promise<void> {
+    // Stop firehose subscription before tearing down other resources
+    await this.ctx.subscription?.destroy()
     await this.terminator?.terminate()
     await this.ctx.redis?.quit()
     await this.ctx.db.close()

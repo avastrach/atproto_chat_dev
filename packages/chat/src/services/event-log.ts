@@ -172,7 +172,15 @@ export class EventLogService {
     const hasMore = rows.length > clampedLimit
     const resultRows = hasMore ? rows.slice(0, clampedLimit) : rows
 
-    const logs: LogEntry[] = resultRows.map((row) => {
+    // Event types that require a 'message' field per lexicon
+    const REQUIRES_MESSAGE: Set<string> = new Set([
+      'message_create',
+      'message_delete',
+      'message_read',
+    ])
+
+    const logs: LogEntry[] = []
+    for (const row of resultRows) {
       const $type = EVENT_TYPE_TO_LEXICON[row.eventType as UserEventType]
       const parsedPayload = row.payload
         ? typeof row.payload === 'string'
@@ -180,13 +188,22 @@ export class EventLogService {
           : row.payload
         : {}
 
-      return {
+      // Skip events that are missing required fields (e.g. old data
+      // stored before a bug fix added the 'message' field)
+      if (
+        REQUIRES_MESSAGE.has(row.eventType) &&
+        !parsedPayload.message
+      ) {
+        continue
+      }
+
+      logs.push({
         $type,
         rev: row.rev,
         convoId: row.convoId,
         ...parsedPayload,
-      }
-    })
+      })
+    }
 
     const result: GetLogResult = { logs }
     if (hasMore && resultRows.length > 0) {

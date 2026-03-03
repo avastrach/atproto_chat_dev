@@ -54,6 +54,7 @@ export type ChatConfig = {
   modServiceUrl?: string
   appviewUrl?: string
   appviewDid?: string
+  repoProvider?: string
 }
 
 export type TestServerParams = {

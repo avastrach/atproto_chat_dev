@@ -80,30 +80,45 @@ export class ReadStateService {
         .where('memberDid', '=', callerDid)
         .execute()
 
-      // Build a message view for the event payload (if there is a message)
-      let messagePayload: Record<string, unknown> = { convoId }
-      if (messageId) {
+      // Build a message view for the event payload.
+      // logReadMessage requires ["rev", "convoId", "message"], so we must
+      // always include a message — either the specified one or the latest.
+      // If the conversation has no messages yet, skip the event entirely.
+      let targetMessageId = messageId
+      if (!targetMessageId) {
+        const latestMsg = await dbTxn.db
+          .selectFrom('message')
+          .where('convoId', '=', convoId)
+          .select('id')
+          .orderBy('id', 'desc')
+          .limit(1)
+          .executeTakeFirst()
+        targetMessageId = latestMsg?.id
+      }
+
+      if (targetMessageId) {
         const msg = await dbTxn.db
           .selectFrom('message')
-          .where('id', '=', messageId)
+          .where('id', '=', targetMessageId)
           .where('convoId', '=', convoId)
           .selectAll()
           .executeTakeFirst()
 
         if (msg) {
-          const msgView = this.viewBuilder.buildMessageView(msg as MessageRow)
-          messagePayload = { convoId, message: msgView }
+          const msgView = msg.deletedAt
+            ? this.viewBuilder.buildDeletedMessageView(msg as MessageRow)
+            : this.viewBuilder.buildMessageView(msg as MessageRow)
+
+          await this.eventLog.fanOutEvent(
+            dbTxn,
+            convoId,
+            'message_read',
+            { convoId, message: msgView },
+            { selfOnly: callerDid },
+          )
         }
       }
-
-      // Fan out message_read event to SELF ONLY
-      await this.eventLog.fanOutEvent(
-        dbTxn,
-        convoId,
-        'message_read',
-        messagePayload,
-        { selfOnly: callerDid },
-      )
+      // If no messages exist, skip the message_read event — nothing to mark as read
 
       return this.viewBuilder.buildConvoView(dbTxn, convoId, callerDid)
     })

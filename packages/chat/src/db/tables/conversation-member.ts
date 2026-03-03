@@ -12,6 +12,7 @@ export interface ConversationMember {
   joinedAt: Generated<string>
   acceptedAt: string | null
   leftAt: string | null
+  rejoinedAt: string | null
 }
 
 export type PartialDB = { [tableName]: ConversationMember }

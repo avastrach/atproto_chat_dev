@@ -432,6 +432,9 @@ importers:
       '@atproto/identity':
         specifier: workspace:^
         version: link:../identity
+      '@atproto/sync':
+        specifier: workspace:^
+        version: link:../sync
       '@atproto/xrpc-server':
         specifier: workspace:^
         version: link:../xrpc-server

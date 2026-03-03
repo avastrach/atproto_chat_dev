@@ -13,6 +13,7 @@ export interface ServiceConfig {
   did: string
   version?: string
   devMode: boolean
+  repoProvider?: string
 }
 
 export interface DatabaseConfig {

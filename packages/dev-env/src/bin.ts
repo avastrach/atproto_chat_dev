@@ -29,11 +29,12 @@ const run = async () => {
     ozone: {
       port: 2587,
       chatUrl: 'http://localhost:2590',
-      chatDid: 'did:example:chat',
+      chatDid: 'did:web:localhost%3A2590',
       dbMaterializedViewRefreshIntervalMs: 30_000,
     },
     chat: {
       port: 2590,
+      serverDid: 'did:web:localhost%3A2590',
     },
     introspect: { port: 2581 },
   })
