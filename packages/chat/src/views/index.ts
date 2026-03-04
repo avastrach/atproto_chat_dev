@@ -294,11 +294,12 @@ export class ViewBuilder {
         .executeTakeFirst()
 
       if (msg) {
-        // If the caller has rejoinedAt set, suppress messages sent before
-        // they rejoined to avoid leaking pre-leave content.
+        // If the caller has rejoinedAt set, suppress messages sent at or
+        // before they rejoined to avoid leaking pre-leave content. Use strict
+        // <= so that messages sent at the exact rejoin moment are also hidden.
         const hidePreRejoin =
           callerMember.rejoinedAt &&
-          new Date(msg.sentAt) < new Date(callerMember.rejoinedAt)
+          new Date(msg.sentAt) <= new Date(callerMember.rejoinedAt)
 
         if (hidePreRejoin) {
           // Leave lastMessage as undefined

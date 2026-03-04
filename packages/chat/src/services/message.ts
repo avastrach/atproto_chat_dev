@@ -538,10 +538,29 @@ export class MessageService {
       ])
 
     // Leave-clears-history: if the caller has rejoined (rejoinedAt is not null),
-    // only show messages sent at or after the rejoin timestamp. A null rejoinedAt
-    // means the member was there from the start and should see all messages.
+    // only show messages sent STRICTLY AFTER the rejoin timestamp. A null
+    // rejoinedAt means the member was there from the start and should see all
+    // messages.
+    //
+    // Use strict '>' instead of '>=' to ensure messages sent at exactly the
+    // rejoin moment are excluded (the rejoin itself does not create a message,
+    // so any message with sentAt == rejoinedAt was sent before the rejoin
+    // transaction committed and should be hidden).
+    //
+    // Normalise the value to an ISO string so the pg driver serialises it
+    // identically to how sentAt was originally stored (new Date().toISOString()).
+    // The pg driver returns timestamptz as a Date object, but passes Date
+    // parameters through a different serialisation path than strings, which
+    // can cause subtle comparison mismatches in edge cases.
     if (membership.rejoinedAt) {
-      query = query.where('message.sentAt', '>=', membership.rejoinedAt)
+      // The pg driver returns timestamptz columns as Date objects at runtime
+      // even though the TypeScript type is `string | null`. Normalise to a
+      // plain ISO string so the query parameter serialisation matches how
+      // sentAt was originally stored.
+      const raw: unknown = membership.rejoinedAt
+      const rejoinedAtStr =
+        raw instanceof Date ? raw.toISOString() : String(raw)
+      query = query.where('message.sentAt', '>', rejoinedAtStr)
     }
 
     // Cursor-based pagination using message ID

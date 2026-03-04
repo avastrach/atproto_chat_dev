@@ -47,7 +47,7 @@ export default function (ctx: AppContext) {
           | { sentAt?: string }
           | undefined
         if (message?.sentAt) {
-          return new Date(message.sentAt) >= new Date(rejoinedAt)
+          return new Date(message.sentAt) > new Date(rejoinedAt)
         }
         // For non-message events, check the event rev timestamp.
         // TID revs encode a timestamp, so lexicographic comparison works:
