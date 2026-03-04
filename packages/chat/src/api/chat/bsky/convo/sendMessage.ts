@@ -27,6 +27,11 @@ export default function (ctx: AppContext) {
       },
     )
 
+    // Hydrate embeds (transform app.bsky.embed.record → #view)
+    if (messageView.embed) {
+      await ctx.services.viewBuilder.hydrateMessageEmbeds([messageView])
+    }
+
     res.json(messageView)
   }
 }

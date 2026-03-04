@@ -58,6 +58,24 @@ export default function (ctx: AppContext) {
       })
     }
 
+    // Hydrate embeds in message_create events
+    const messageViews: Array<Record<string, unknown>> = []
+    for (const entry of filteredLogs) {
+      if (
+        entry.type === 'message_create' &&
+        entry.message &&
+        typeof entry.message === 'object'
+      ) {
+        const msg = entry.message as Record<string, unknown>
+        if (msg.$type === 'chat.bsky.convo.defs#messageView' && msg.embed) {
+          messageViews.push(msg as any)
+        }
+      }
+    }
+    if (messageViews.length > 0) {
+      await ctx.services.viewBuilder.hydrateMessageEmbeds(messageViews as any)
+    }
+
     const response: Record<string, unknown> = {
       logs: filteredLogs,
     }

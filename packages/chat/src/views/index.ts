@@ -1,3 +1,4 @@
+import { AtpAgent } from '@atproto/api'
 import { Database } from '../db'
 import { ProfileSyncService } from '../services/profile-sync'
 
@@ -92,6 +93,7 @@ export interface ReactionRow {
 
 export class ViewBuilder {
   private profileSync?: ProfileSyncService
+  private appviewAgent?: AtpAgent
 
   /**
    * Set the ProfileSyncService used for on-demand profile refresh in
@@ -99,6 +101,94 @@ export class ViewBuilder {
    */
   setProfileSyncService(svc: ProfileSyncService): void {
     this.profileSync = svc
+  }
+
+  /**
+   * Set the AppView agent used for embed hydration.
+   * Called once during AppContext initialisation.
+   */
+  setAppviewAgent(agent: AtpAgent): void {
+    this.appviewAgent = agent
+  }
+
+  /**
+   * Hydrate embeds in an array of message views.
+   *
+   * Transforms raw `app.bsky.embed.record` embeds (which contain just
+   * `{record: {uri, cid}}`) into `app.bsky.embed.record#view` embeds
+   * (which contain the full post data needed for the frontend to render
+   * embed cards).
+   *
+   * Uses `app.bsky.feed.getPosts` to batch-fetch the referenced posts
+   * from the AppView, then builds the view structure.
+   *
+   * If the AppView is unavailable or a post cannot be fetched, the raw
+   * embed is left in place (graceful degradation).
+   */
+  async hydrateMessageEmbeds(messages: MessageView[]): Promise<void> {
+    if (!this.appviewAgent) return
+
+    // Collect all messages with record embeds that need hydration
+    const toHydrate: Array<{ message: MessageView; uri: string }> = []
+    for (const msg of messages) {
+      const embed = msg.embed as Record<string, unknown> | undefined
+      if (!embed) continue
+      if (
+        embed.$type === 'app.bsky.embed.record' &&
+        embed.record &&
+        typeof (embed.record as Record<string, unknown>).uri === 'string'
+      ) {
+        toHydrate.push({
+          message: msg,
+          uri: (embed.record as Record<string, unknown>).uri as string,
+        })
+      }
+    }
+
+    if (toHydrate.length === 0) return
+
+    // Batch-fetch posts from AppView (getPosts supports up to 25 URIs)
+    const uris = [...new Set(toHydrate.map((h) => h.uri))]
+
+    // getPosts has a max of 25 URIs per request
+    const postMap = new Map<string, unknown>()
+    for (let i = 0; i < uris.length; i += 25) {
+      const batch = uris.slice(i, i + 25)
+      try {
+        const res = await this.appviewAgent.api.app.bsky.feed.getPosts({
+          uris: batch,
+        })
+        for (const post of res.data.posts) {
+          postMap.set(post.uri, post)
+        }
+      } catch {
+        // AppView unavailable: skip hydration for this batch
+      }
+    }
+
+    // Transform embeds from Main to View format
+    for (const { message, uri } of toHydrate) {
+      const post = postMap.get(uri) as Record<string, unknown> | undefined
+      if (!post) continue
+
+      message.embed = {
+        $type: 'app.bsky.embed.record#view',
+        record: {
+          $type: 'app.bsky.embed.record#viewRecord',
+          uri: post.uri,
+          cid: post.cid,
+          author: post.author,
+          value: post.record,
+          labels: post.labels ?? [],
+          replyCount: post.replyCount ?? 0,
+          repostCount: post.repostCount ?? 0,
+          likeCount: post.likeCount ?? 0,
+          quoteCount: post.quoteCount ?? 0,
+          indexedAt: post.indexedAt,
+          embeds: post.embed ? [post.embed] : [],
+        },
+      }
+    }
   }
 
   /**

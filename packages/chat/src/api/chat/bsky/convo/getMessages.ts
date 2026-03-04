@@ -1,6 +1,7 @@
 import express from 'express'
 import { InvalidRequestError } from '@atproto/xrpc-server'
 import { AppContext } from '../../../../context'
+import type { MessageView } from '../../../../views'
 
 export default function (ctx: AppContext) {
   return async (req: express.Request, res: express.Response) => {
@@ -25,6 +26,15 @@ export default function (ctx: AppContext) {
       convoId,
       { limit, cursor },
     )
+
+    // Hydrate embeds (transform app.bsky.embed.record → #view)
+    const messageViews = result.messages.filter(
+      (m): m is MessageView =>
+        m.$type === 'chat.bsky.convo.defs#messageView',
+    )
+    if (messageViews.length > 0) {
+      await ctx.services.viewBuilder.hydrateMessageEmbeds(messageViews)
+    }
 
     const response: Record<string, unknown> = {
       messages: result.messages,

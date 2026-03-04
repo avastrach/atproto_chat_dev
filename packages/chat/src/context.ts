@@ -105,6 +105,11 @@ export class AppContext {
     // refresh stale / missing member profiles on the fly.
     viewBuilder.setProfileSyncService(profileSync)
 
+    // Wire AppView agent into the view builder for embed hydration
+    if (appviewAgent) {
+      viewBuilder.setAppviewAgent(appviewAgent)
+    }
+
     const conversation = new ConversationService(
       db,
       eventLog,
