@@ -89,35 +89,70 @@ export class ConversationService {
           .executeTakeFirst()
 
         if (callerMember?.status === 'left') {
-          // Rejoin: set status back to 'request', reset unread count,
-          // and record rejoinedAt so getMessages filters out pre-leave history
+          const now = new Date().toISOString()
+
+          // Rejoin caller: set status back to 'accepted' (they initiated),
+          // reset unread count, and record rejoinedAt so getMessages filters
+          // out pre-leave history.
           await dbTxn.db
             .updateTable('conversation_member')
             .set({
-              status: 'request',
+              status: 'accepted',
+              acceptedAt: now,
               unreadCount: 0,
               leftAt: null,
-              rejoinedAt: new Date().toISOString(),
+              rejoinedAt: now,
             })
             .where('convoId', '=', convoId)
             .where('memberDid', '=', callerDid)
             .execute()
 
-          // Emit convo_begin event for the rejoining user
+          // Also re-add other members who have left. When the caller
+          // reinitiates the conversation, all 'left' members should be
+          // brought back as 'request' (they will see the new conversation
+          // in their inbox and can accept or reject it).
+          const otherLeftMembers = await dbTxn.db
+            .selectFrom('conversation_member')
+            .where('convoId', '=', convoId)
+            .where('memberDid', '!=', callerDid)
+            .where('status', '=', 'left')
+            .select('memberDid')
+            .execute()
+
+          for (const member of otherLeftMembers) {
+            // Determine status based on privacy check
+            const privacyResult = await this.privacy.checkCanInitiateConvo(
+              dbTxn,
+              callerDid,
+              member.memberDid,
+            )
+            await dbTxn.db
+              .updateTable('conversation_member')
+              .set({
+                status: privacyResult.canChat ? 'accepted' : 'request',
+                unreadCount: 0,
+                leftAt: null,
+                rejoinedAt: now,
+              })
+              .where('convoId', '=', convoId)
+              .where('memberDid', '=', member.memberDid)
+              .execute()
+          }
+
+          // Emit convo_begin event for all re-added members
           const revs = await this.eventLog.fanOutEvent(
             dbTxn,
             convoId,
             'convo_begin',
             { convoId },
-            { selfOnly: callerDid },
           )
 
           // Update conversation rev
-          const callerRev = revs.get(callerDid)
-          if (callerRev) {
+          const latestRev = [...revs.values()].sort().pop()
+          if (latestRev) {
             await dbTxn.db
               .updateTable('conversation')
-              .set({ rev: callerRev })
+              .set({ rev: latestRev })
               .where('id', '=', convoId)
               .execute()
           }
@@ -126,19 +161,45 @@ export class ConversationService {
         return this.viewBuilder.buildConvoView(dbTxn, convoId, callerDid)
       }
 
-      // Block check: verify caller is not blocked by (or blocking) any other member
+      // Privacy checks: block/chatDisabled throw; allowIncoming determines status.
+      //
+      // Per the AT Protocol chat spec, getConvoForMembers should always create
+      // the conversation. The privacy check determines the *initial status* of
+      // non-caller members:
+      //   - If the recipient allows incoming (canChat=true): status='accepted'
+      //   - If the recipient restricts incoming (allowIncoming='following'/
+      //     'none'): status='request' (the conversation appears in the
+      //     recipient's inbox as a request)
+      //   - If there is a block or chatDisabled: throw (hard deny)
+      const memberStatuses = new Map<string, 'accepted' | 'request'>()
       for (const memberDid of uniqueMembers) {
-        if (memberDid === callerDid) continue
+        if (memberDid === callerDid) {
+          memberStatuses.set(memberDid, 'accepted')
+          continue
+        }
+
+        // Check blocks and chatDisabled (hard deny)
+        const blockResult = await this.privacy.checkCanSendToMember(
+          dbTxn,
+          callerDid,
+          memberDid,
+        )
+        if (!blockResult.canChat) {
+          throw new InvalidRequestError(
+            blockResult.reason ?? 'block between recipient and sender',
+          )
+        }
+
+        // Check allowIncoming to determine status (soft deny -> request)
         const privacyResult = await this.privacy.checkCanInitiateConvo(
           dbTxn,
           callerDid,
           memberDid,
         )
-        if (!privacyResult.canChat) {
-          throw new InvalidRequestError(
-            privacyResult.reason ?? 'block between recipient and sender',
-          )
-        }
+        memberStatuses.set(
+          memberDid,
+          privacyResult.canChat ? 'accepted' : 'request',
+        )
       }
 
       // Create new conversation
@@ -152,17 +213,18 @@ export class ConversationService {
         })
         .execute()
 
-      // Insert members
+      // Insert members with status determined by privacy checks.
       // rejoinedAt is null for initial creation -- null means "show all messages"
       // (the member was present from the start, no history filtering needed)
       for (const memberDid of uniqueMembers) {
         const isCaller = memberDid === callerDid
+        const status = memberStatuses.get(memberDid) ?? 'request'
         await dbTxn.db
           .insertInto('conversation_member')
           .values({
             convoId,
             memberDid,
-            status: isCaller ? 'accepted' : 'request',
+            status,
             acceptedAt: isCaller ? new Date().toISOString() : null,
             rejoinedAt: null,
           })
@@ -540,22 +602,8 @@ export class ConversationService {
       )
     }
 
-    // Check privacy/blocks for each non-caller member
-    let canChat = true
-    for (const memberDid of uniqueMembers) {
-      if (memberDid === callerDid) continue
-      const result = await this.privacy.checkCanInitiateConvo(
-        this.db,
-        callerDid,
-        memberDid,
-      )
-      if (!result.canChat) {
-        canChat = false
-        break
-      }
-    }
-
-    // Check if conversation already exists
+    // Check if conversation already exists first — an existing accepted
+    // conversation means the users can chat regardless of allowIncoming changes.
     const convoId = generateConvoId(uniqueMembers)
     const existing = await this.db.db
       .selectFrom('conversation')
@@ -579,6 +627,31 @@ export class ConversationService {
           convoId,
           callerDid,
         )
+
+        // If the conversation already exists and the caller is an accepted
+        // member, they can always chat (allowIncoming only applies to NEW
+        // conversation creation, not existing accepted conversations).
+        if (membership.status === 'accepted') {
+          return { canChat: true, convo }
+        }
+      }
+    }
+
+    // Check privacy/blocks for each non-caller member.
+    // Only check blocks (hard deny); allowIncoming restrictions just mean
+    // the conversation would be created as a request, not that chat is
+    // impossible.
+    let canChat = true
+    for (const memberDid of uniqueMembers) {
+      if (memberDid === callerDid) continue
+      const result = await this.privacy.checkCanSendToMember(
+        this.db,
+        callerDid,
+        memberDid,
+      )
+      if (!result.canChat) {
+        canChat = false
+        break
       }
     }
 
